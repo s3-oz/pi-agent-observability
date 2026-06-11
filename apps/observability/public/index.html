@@ -94,6 +94,11 @@
     .pill.compaction{background:#3a3a1a;color:var(--yellow)}
     .pill.branch_nav{background:#1a2a3a;color:var(--cyan)}
     .pill.agent_start,.pill.agent_end,.pill.turn_start,.pill.turn_end,.pill.custom{color:var(--muted)}
+    /* Harness badge: explicit CC / CODEX / PI tag per session (sidebar + header) */
+    .harness-badge{display:inline-block;padding:0 5px;margin-right:5px;border-radius:5px;font-size:10.5px;font-weight:700;letter-spacing:0.5px;font-family:monospace;vertical-align:middle;border:1px solid var(--border);background:var(--pill-bg);color:var(--muted);line-height:1.6}
+    .harness-badge.h-cc{color:var(--orange);border-color:rgba(210,153,29,0.5);background:rgba(210,153,29,0.10)}
+    .harness-badge.h-codex{color:var(--cyan);border-color:rgba(57,197,207,0.5);background:rgba(57,197,207,0.10)}
+    .harness-badge.h-pi{color:var(--purple);border-color:rgba(163,113,247,0.5);background:rgba(163,113,247,0.10)}
     .tool-name-pill{display:inline-block;margin-left:4px;padding:1px 6px;border-radius:6px;font-size:12px;font-weight:650;letter-spacing:0.1px;text-transform:none;background:var(--tool-bg);border:1px solid var(--tool-border);color:var(--tool-fg);max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:top;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.04)}
     .evt-detail{display:none;padding:5px 8px 5px 78px;background:#0d1219;border-bottom:1px solid rgba(48,54,61,0.3);position:relative}
     .evt-detail.open{display:block}

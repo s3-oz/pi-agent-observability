@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   session_file TEXT,
   provider     TEXT,
   model        TEXT,
+  harness      TEXT,
   first_ts     TEXT NOT NULL,
   last_ts      TEXT NOT NULL,
   event_count  INTEGER NOT NULL DEFAULT 0,
@@ -65,6 +66,8 @@ export function createDb(path: string): Database {
   db.run("PRAGMA journal_mode = WAL");
   db.run("PRAGMA busy_timeout = 5000");
   db.run(SCHEMA);
+  // Additive migration for DBs created before the harness column existed.
+  try { db.run("ALTER TABLE sessions ADD COLUMN harness TEXT"); } catch { /* already present */ }
   return db;
 }
 
@@ -83,9 +86,9 @@ export function prepare(db: Database): PreparedQueries {
   // incoming values. Tags are merged via UNION to accumulate unique tags.
   const upsertSession = db.query(`
     INSERT INTO sessions
-      (session_id, pool, agent_name, cwd, session_file, provider, model, first_ts, last_ts, event_count, tags_json)
+      (session_id, pool, agent_name, cwd, session_file, provider, model, harness, first_ts, last_ts, event_count, tags_json)
     VALUES
-      ($session_id, $pool, $agent_name, $cwd, $session_file, $provider, $model, $ts, $ts, 1, $tags_json)
+      ($session_id, $pool, $agent_name, $cwd, $session_file, $provider, $model, $harness, $ts, $ts, 1, $tags_json)
     ON CONFLICT(session_id) DO UPDATE SET
       pool         = COALESCE(excluded.pool,         sessions.pool),
       agent_name   = COALESCE(excluded.agent_name,   sessions.agent_name),
@@ -93,6 +96,7 @@ export function prepare(db: Database): PreparedQueries {
       session_file = COALESCE(excluded.session_file, sessions.session_file),
       provider     = COALESCE(excluded.provider,     sessions.provider),
       model        = COALESCE(excluded.model,        sessions.model),
+      harness      = COALESCE(excluded.harness,      sessions.harness),
       first_ts     = COALESCE(sessions.first_ts,     excluded.last_ts),
       last_ts      = MAX(excluded.last_ts,           sessions.last_ts),
       event_count  = sessions.event_count + 1,
@@ -109,9 +113,9 @@ export function prepare(db: Database): PreparedQueries {
   // ── Upsert session without bumping event_count (duplicate events) ──────
   const upsertSessionNoBump = db.query(`
     INSERT INTO sessions
-      (session_id, pool, agent_name, cwd, session_file, provider, model, first_ts, last_ts, event_count, tags_json)
+      (session_id, pool, agent_name, cwd, session_file, provider, model, harness, first_ts, last_ts, event_count, tags_json)
     VALUES
-      ($session_id, $pool, $agent_name, $cwd, $session_file, $provider, $model, $ts, $ts, 1, $tags_json)
+      ($session_id, $pool, $agent_name, $cwd, $session_file, $provider, $model, $harness, $ts, $ts, 1, $tags_json)
     ON CONFLICT(session_id) DO UPDATE SET
       pool         = COALESCE(excluded.pool,         sessions.pool),
       agent_name   = COALESCE(excluded.agent_name,   sessions.agent_name),
@@ -119,6 +123,7 @@ export function prepare(db: Database): PreparedQueries {
       session_file = COALESCE(excluded.session_file, sessions.session_file),
       provider     = COALESCE(excluded.provider,     sessions.provider),
       model        = COALESCE(excluded.model,        sessions.model),
+      harness      = COALESCE(excluded.harness,      sessions.harness),
       first_ts     = COALESCE(sessions.first_ts,     excluded.last_ts),
       last_ts      = MAX(excluded.last_ts,           sessions.last_ts),
       tags_json    = (
@@ -140,6 +145,7 @@ export function prepare(db: Database): PreparedQueries {
       COALESCE(session_file, '') AS session_file,
       COALESCE(provider, '') AS provider,
       COALESCE(model, '') AS model,
+      COALESCE(harness, '') AS harness,
       first_ts, last_ts, event_count,
       tags_json
     FROM sessions
@@ -270,9 +276,22 @@ export function toSessionRow(e: ObsEvent): Record<string, unknown> {
     $session_file: e.session_file ?? null,
     $provider: e.provider ?? null,
     $model: e.model ?? null,
+    $harness: e.harness ?? null,
     $ts: e.ts,
     $tags_json: JSON.stringify(e.tags ?? []),
   };
+}
+
+// Pool → harness fallback for events that don't carry an explicit `harness`
+// field (Pi's own emitter, plus every row ingested before the column existed).
+const POOL_HARNESS: Record<string, string> = {
+  "claude-code": "CC",
+  "codex": "CODEX",
+  "global-pi": "PI",
+};
+
+export function harnessForPool(pool?: string): string {
+  return POOL_HARNESS[pool ?? ""] ?? "";
 }
 
 export function rowToSession(row: any): SessionSummary {
@@ -290,6 +309,7 @@ export function rowToSession(row: any): SessionSummary {
     session_file: row.session_file || undefined,
     provider: row.provider || undefined,
     model: row.model || undefined,
+    harness: row.harness || harnessForPool(row.pool) || undefined,
     first_ts: row.first_ts,
     last_ts: row.last_ts,
     event_count: row.event_count,

@@ -51,6 +51,8 @@ export interface ObsEventEnvelope<P = unknown> {
   // ── model ──
   provider?: string;
   model?: string;
+  /** explicit harness tag (e.g. "CC" | "CODEX" | "PI"); when absent the server derives it from `pool` */
+  harness?: string;
 
   // ── payload + ordering ──
   payload: P;
@@ -288,6 +290,8 @@ export interface SessionSummary {
   session_file?: string;
   provider?: string;
   model?: string;
+  /** harness tag: stored value from events, else derived from pool (claude-code→CC, codex→CODEX, global-pi→PI) */
+  harness?: string;
   first_ts: string;
   last_ts: string;
   event_count: number;

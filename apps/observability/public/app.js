@@ -276,7 +276,7 @@ function computeAgentInfo(sid) {
     name: s.agent_name ?? s.cwd?.split("/").pop() ?? shortId(sid),
     sid, shortSid: shortId(sid),
     model: s.model || "", provider: s.provider || "",
-    tags: s.tags || [], pool: s.pool || "default",
+    tags: s.tags || [], pool: s.pool || "default", harness: s.harness || "",
     eventCount: s.event_count ?? events.length,
     durationMs, cost: stats.total_cost ?? 0,
     inputTokens, outputTokens, cacheRead, cacheWrite,
@@ -312,7 +312,7 @@ function renderAgentSubnav() {
   const ctxBarColor = ctxPctUsed > 90 ? "var(--red)" : ctxPctUsed > 70 ? "var(--orange)" : "var(--green)";
   sessionSubnav.innerHTML = `
     <div class="snav-group snav-identity">
-      <div class="snav-name" title="${escapeHtml(info.sid)}">${escapeHtml(info.name)}</div>
+      <div class="snav-name" title="${escapeHtml(info.sid)}">${harnessBadgeHTML(info)}${escapeHtml(info.name)}</div>
       <div class="snav-sid"><code>${info.shortSid}</code>${info.model ? `<span class="snav-model">${escapeHtml(info.model)}</span>` : ""}</div>
       <div class="snav-tags"><span class="snav-pool">${escapeHtml(info.pool)}</span>${tagsHtml}</div>
     </div>
@@ -570,7 +570,7 @@ function renderSessions() {
 
     const info = document.createElement("div");
     info.className = "info";
-    info.innerHTML = `<div class="name">${escapeHtml(name)}${errDotHtml}${hiddenNote}</div><div class="uuid">${shortId}${s.model ? " · " + s.model : ""}</div><div class="meta">${s.pool} · ${s.event_count} events · ${relTime}</div>${costStr ? `<div class="cost">${costStr}</div>` : ""}`;
+    info.innerHTML = `<div class="name">${harnessBadgeHTML(s)}${escapeHtml(name)}${errDotHtml}${hiddenNote}</div><div class="uuid">${shortId}${s.model ? " · " + s.model : ""}</div><div class="meta">${s.pool} · ${s.event_count} events · ${relTime}</div>${costStr ? `<div class="cost">${costStr}</div>` : ""}`;
 
     if (STATE.view === "single") {
       el.addEventListener("click", () => selectSession(s.session_id));
@@ -1107,6 +1107,15 @@ function toolNameColors(name) {
     border: `hsl(${hue} ${Math.min(86, sat + 12)}% 46%)`,
     fg: `hsl(${hue} 92% 88%)`,
   };
+}
+// Compact harness badge (CC / CODEX / PI). `o` is any object carrying a
+// `harness` string — a SessionSummary from /sessions or computeAgentInfo()
+// output. The server derives harness from pool when events don't carry one,
+// so unknown pools simply render no badge.
+function harnessBadgeHTML(o) {
+  const h = o?.harness;
+  if (!h) return "";
+  return `<span class="harness-badge h-${escapeHtml(String(h).toLowerCase())}">${escapeHtml(h)}</span>`;
 }
 function toolNamePillHTML(evt) {
   if (evt.type !== "tool_call" && evt.type !== "tool_result") return "";

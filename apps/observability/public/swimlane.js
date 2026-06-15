@@ -120,7 +120,7 @@ window.__swimlaneReanchorAll = function() {
 
 function createLane(sid) {
   const sess = STATE.sessions.find(s => s.session_id === sid);
-  const name = sess?.agent_name ?? sess?.cwd?.split("/").pop() ?? shortId(sid);
+  const name = sess?.session_name ?? sess?.agent_name ?? sess?.cwd?.split("/").pop() ?? shortId(sid);
 
   const col = document.createElement("div");
   col.className = "lane-column";
@@ -322,7 +322,7 @@ function updateLaneHeader(sid) {
   const modelEl = lane.col.querySelector(".lane-model");
   const costEl = lane.col.querySelector(".lane-cost");
   if (nameEl && lane.session) {
-    const n = lane.session.agent_name ?? lane.session.cwd?.split("/").pop() ?? shortId(sid);
+    const n = lane.session.session_name ?? lane.session.agent_name ?? lane.session.cwd?.split("/").pop() ?? shortId(sid);
     nameEl.textContent = n; nameEl.title = n;
   }
   if (modelEl && lane.session) modelEl.textContent = lane.session.model ?? "";

@@ -220,6 +220,7 @@ function createEventEnvelope<T>(
     sessionFile?: string;
     cwd: string;
     agentName?: string;
+    sessionName?: string;
     pool: string;
     tags: string[];
     provider?: string;
@@ -235,6 +236,7 @@ function createEventEnvelope<T>(
     session_file: sessionInfo.sessionFile,
     cwd: sessionInfo.cwd,
     agent_name: sessionInfo.agentName,
+    session_name: sessionInfo.sessionName,
     pool: sessionInfo.pool,
     tags: sessionInfo.tags,
     provider: sessionInfo.provider,
@@ -410,6 +412,7 @@ export default function (pi: ExtensionAPI) {
     sessionFile?: string;
     cwd: string;
     agentName?: string;
+    sessionName?: string;
     pool: string;
     tags: string[];
     provider?: string;
@@ -432,6 +435,12 @@ export default function (pi: ExtensionAPI) {
     } catch {
       // ignore
     }
+  }
+
+  function enqueue<T>(type: string, payload: T) {
+    if (!queue || !sessionInfo) return;
+    sessionInfo.sessionName = pi.getSessionName();
+    queue.push(createEventEnvelope(type, payload, sessionInfo));
   }
 
   // ━━ session_start ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -507,6 +516,7 @@ export default function (pi: ExtensionAPI) {
       sessionFile: ctx.sessionManager.getSessionFile(),
       cwd: ctx.cwd,
       agentName: name,
+      sessionName: ctx.sessionManager.getSessionName(),
       pool,
       tags,
       provider: ctx.model?.provider,
@@ -522,7 +532,7 @@ export default function (pi: ExtensionAPI) {
       pi_version: (pi as any).version || undefined,
       previous_session_file: event.previousSessionFile,
     };
-    queue.push(createEventEnvelope("session_start", startPayload, sessionInfo));
+    enqueue("session_start", startPayload);
   });
 
   // ━━ before_agent_start (agent_start) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -550,7 +560,7 @@ export default function (pi: ExtensionAPI) {
       payload.system_prompt_options = buildSystemPromptOptionsDigest(event.systemPromptOptions);
       bootSnapshotEmitted = true;
     }
-    queue.push(createEventEnvelope("agent_start", payload, sessionInfo));
+    enqueue("agent_start", payload);
   });
 
   // ━━ agent_end ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -559,7 +569,7 @@ export default function (pi: ExtensionAPI) {
     const payload: AgentEndPayload = {
       message_count: event.messages ? event.messages.length : 0,
     };
-    queue.push(createEventEnvelope("agent_end", payload, sessionInfo));
+    enqueue("agent_end", payload);
   });
 
   // ━━ turn_start ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -570,7 +580,7 @@ export default function (pi: ExtensionAPI) {
     const payload: TurnStartPayload = {
       turn_index: event.turnIndex,
     };
-    queue.push(createEventEnvelope("turn_start", payload, sessionInfo));
+    enqueue("turn_start", payload);
   });
 
   // ━━ turn_end ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -592,7 +602,7 @@ export default function (pi: ExtensionAPI) {
       turn_index: event.turnIndex,
       usage,
     };
-    queue.push(createEventEnvelope("turn_end", payload, sessionInfo));
+    enqueue("turn_end", payload);
   });
 
   // ━━ message_start (user_message) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -605,7 +615,7 @@ export default function (pi: ExtensionAPI) {
       text: truncateToBytes(text, MAX_TEXT_FIELD).text,
       images_count,
     };
-    queue.push(createEventEnvelope("user_message", payload, sessionInfo));
+    enqueue("user_message", payload);
   });
 
   // First-token timing for TTFT — we watch streaming deltas only to record
@@ -701,13 +711,13 @@ export default function (pi: ExtensionAPI) {
       turn_index: activeTurnIndex,
     };
 
-    queue.push(createEventEnvelope("assistant_message", payload, sessionInfo));
+    enqueue("assistant_message", payload);
 
     if (thinking) {
       const thinkingPayload: ThinkingPayload = {
         text: thinking,
       };
-      queue.push(createEventEnvelope("thinking", thinkingPayload, sessionInfo));
+      enqueue("thinking", thinkingPayload);
     }
   });
 
@@ -721,7 +731,7 @@ export default function (pi: ExtensionAPI) {
       args,
       args_truncated: truncated,
     };
-    queue.push(createEventEnvelope("tool_call", payload, sessionInfo));
+    enqueue("tool_call", payload);
   });
 
   // ━━ tool_result (do NOT modify) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -757,7 +767,7 @@ export default function (pi: ExtensionAPI) {
       is_error: event.isError === true,
       details_summary,
     };
-    queue.push(createEventEnvelope("tool_result", payload, sessionInfo));
+    enqueue("tool_result", payload);
   });
 
   // ━━ model_select ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -774,7 +784,7 @@ export default function (pi: ExtensionAPI) {
       previous_model: event.previousModel?.id,
       source: event.source ?? "set",
     };
-    queue.push(createEventEnvelope("model_change", payload, sessionInfo));
+    enqueue("model_change", payload);
   });
 
   // ━━ session_compact ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -787,7 +797,7 @@ export default function (pi: ExtensionAPI) {
       first_kept_entry_id: ce?.firstKeptEntryId ?? "",
       summary_preview: truncateToBytes(ce?.summary ?? "", 2000).text,
     };
-    queue.push(createEventEnvelope("compaction", payload, sessionInfo));
+    enqueue("compaction", payload);
   });
 
   // ━━ session_tree ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -800,7 +810,7 @@ export default function (pi: ExtensionAPI) {
       has_summary: !!se,
       summary_preview: se ? truncateToBytes(se.summary ?? "", 2000).text : undefined,
     };
-    queue.push(createEventEnvelope("branch_nav", payload, sessionInfo));
+    enqueue("branch_nav", payload);
   });
 
   // ━━ session_shutdown ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -810,7 +820,7 @@ export default function (pi: ExtensionAPI) {
     const shutdownPayload: SessionShutdownPayload = {
       reason: event.reason,
     };
-    queue.push(createEventEnvelope("session_shutdown", shutdownPayload, sessionInfo));
+    enqueue("session_shutdown", shutdownPayload);
 
     await queue.stop();
   });

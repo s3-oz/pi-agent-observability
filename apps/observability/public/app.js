@@ -273,7 +273,7 @@ function computeAgentInfo(sid) {
   const durationMs = Math.max(0, end - start);
 
   return {
-    name: s.agent_name ?? s.cwd?.split("/").pop() ?? shortId(sid),
+    name: s.session_name ?? s.agent_name ?? s.cwd?.split("/").pop() ?? shortId(sid),
     sid, shortSid: shortId(sid),
     model: s.model || "", provider: s.provider || "",
     tags: s.tags || [], pool: s.pool || "default", harness: s.harness || "",
@@ -556,7 +556,7 @@ function renderSessions() {
     const hasErr = stats && stats.error_count > 0;
     const isAckd = STATE.ackd.has(s.session_id);
     const errDotHtml = hasErr ? ` <span class="err-dot${isAckd ? ' ackd' : ''}">●</span>` : '';
-    const name = s.agent_name ?? s.cwd?.split("/").pop() ?? shortId;
+    const name = s.session_name ?? s.agent_name ?? s.cwd?.split("/").pop() ?? shortId;
     const hiddenNote = hiddenByUser ? ' <span class="session-hidden-note">hidden</span>' : (hiddenByAge ? ' <span class="session-hidden-note">aged</span>' : '');
     const relTime = fmtRel(s.last_ts);
 
@@ -606,7 +606,7 @@ function buildMiniSessionItem(s) {
       : (window.__raceIsSelected?.(s.session_id) ?? false);
   el.className = "session-mini" + (isSel ? " selected" : "");
   el.dataset.sid = s.session_id;
-  const name = s.agent_name ?? s.cwd?.split("/").pop() ?? s.session_id;
+  const name = s.session_name ?? s.agent_name ?? s.cwd?.split("/").pop() ?? s.session_id;
   const stats = STATE.sessionStats[s.session_id];
   const costStr = stats ? ` · $${stats.total_cost.toFixed(4)}` : "";
   el.title = `${name}\n${s.session_id.slice(0, 8)} · ${s.event_count} events · ${fmtRel(s.last_ts)}${costStr}`;
@@ -661,7 +661,7 @@ function selectSession(sid) {
 
 async function loadSession(sid) {
   const s = STATE.sessions.find(x => x.session_id === sid);
-  paneLabel.textContent = s ? (s.agent_name ?? s.cwd?.split("/").pop() ?? shortId(sid)) : shortId(sid);
+  paneLabel.textContent = s ? (s.session_name ?? s.agent_name ?? s.cwd?.split("/").pop() ?? shortId(sid)) : shortId(sid);
   const events = await fetchSessionEvents(sid);
   if (STATE.selectedSessionId !== sid) return;
   STATE.events = events || [];
@@ -1064,7 +1064,7 @@ function activityStatus(s) {
 }
 
 function agentLetter(s) {
-  const name = s.agent_name ?? s.cwd?.split("/").pop() ?? s.session_id ?? "?";
+  const name = s.session_name ?? s.agent_name ?? s.cwd?.split("/").pop() ?? s.session_id ?? "?";
   const ch = String(name).trim().charAt(0).toUpperCase();
   return ch || "?";
 }

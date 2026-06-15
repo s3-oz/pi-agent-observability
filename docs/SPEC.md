@@ -67,6 +67,7 @@ interface ObsEvent {
   // ── identity (who emitted it) ───────────────────────────────────
   session_id:  string;        // pi session uuid
   session_file?: string;      // absolute path to session.jsonl (if any)
+  session_name?: string;      // Pi session display name (from --name or /name)
   cwd:         string;
   agent_name?: string;        // optional human name (from --o-name)
   pool?:       string;        // --o-pool, defaults to "default"
@@ -142,6 +143,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   session_id   TEXT PRIMARY KEY,
   pool         TEXT NOT NULL DEFAULT 'default',
   agent_name   TEXT,
+  session_name TEXT,
   cwd          TEXT,
   session_file TEXT,
   provider     TEXT,

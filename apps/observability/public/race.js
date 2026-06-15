@@ -196,7 +196,7 @@ function renderTrack(sid) {
   if (!track?.el) return;
   const sess = STATE.sessions.find(s => s.session_id === sid) || track.session;
   if (sess) track.session = sess;
-  const name = sess?.agent_name ?? sess?.cwd?.split("/").pop() ?? shortId(sid);
+  const name = sess?.session_name ?? sess?.agent_name ?? sess?.cwd?.split("/").pop() ?? shortId(sid);
   const groups = buildTurnGroups(track.events);
   const latest = track.events[track.events.length - 1];
   const model = sess?.model ? ` · ${escapeHtml(sess.model)}` : "";
@@ -343,7 +343,7 @@ function openInspector(track, evt) {
   currentInspectorEvent = evt;
   if (inspectorWrap) inspectorWrap.textContent = "↩";
   const sess = track.session || STATE.sessions.find(s => s.session_id === evt.session_id);
-  const name = sess?.agent_name ?? sess?.cwd?.split("/").pop() ?? shortId(evt.session_id);
+  const name = sess?.session_name ?? sess?.agent_name ?? sess?.cwd?.split("/").pop() ?? shortId(evt.session_id);
   inspectorTitle.textContent = evt.type.replace(/_/g, " ");
   inspectorBody.innerHTML = `
     <div class="race-inspector-meta">

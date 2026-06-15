@@ -143,7 +143,7 @@ All three views consume the same SSE stream from `server.ts`. The same `ObsEvent
 
 `shared/types.ts` is the single source of truth. Every event carries:
 
-- **identity**: `session_id`, `cwd`, `pool`, `tags`, `agent_name`, `provider`, `model`
+- **identity**: `session_id`, `session_name`, `cwd`, `pool`, `tags`, `agent_name`, `provider`, `model`
 - **ordering**: monotonic `seq` per session (and `(session_id, seq)` is `UNIQUE` in the DB, so the extension's own bugs surface immediately)
 - **payload**: a discriminated union keyed by `type`
 

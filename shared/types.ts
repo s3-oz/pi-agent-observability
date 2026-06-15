@@ -39,6 +39,8 @@ export interface ObsEventEnvelope<P = unknown> {
   session_id: string;
   /** absolute path to session.jsonl, if pi has one */
   session_file?: string;
+  /** Pi session display name from --name or /name, if set */
+  session_name?: string;
   /** the agent's working directory at session_start */
   cwd: string;
   /** human-friendly name from --o-name (optional) */
@@ -286,6 +288,7 @@ export interface SessionSummary {
   session_id: string;
   pool: string;
   agent_name?: string;
+  session_name?: string;
   cwd?: string;
   session_file?: string;
   provider?: string;

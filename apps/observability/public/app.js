@@ -276,6 +276,7 @@ function computeAgentInfo(sid) {
     name: s.session_name ?? s.agent_name ?? s.cwd?.split("/").pop() ?? shortId(sid),
     sid, shortSid: shortId(sid),
     model: s.model || "", provider: s.provider || "",
+    worktree: s.worktree || "",
     tags: s.tags || [], pool: s.pool || "default", harness: s.harness || "",
     eventCount: s.event_count ?? events.length,
     durationMs, cost: stats.total_cost ?? 0,
@@ -313,7 +314,7 @@ function renderAgentSubnav() {
   sessionSubnav.innerHTML = `
     <div class="snav-group snav-identity">
       <div class="snav-name" title="${escapeHtml(info.sid)}">${harnessBadgeHTML(info)}${escapeHtml(info.name)}</div>
-      <div class="snav-sid"><code>${info.shortSid}</code>${info.model ? `<span class="snav-model">${escapeHtml(info.model)}</span>` : ""}</div>
+      <div class="snav-sid"><code>${info.shortSid}</code>${info.worktree ? `<span class="snav-model">⎇ ${escapeHtml(info.worktree)}</span>` : ""}${info.model ? `<span class="snav-model">${escapeHtml(info.model)}</span>` : ""}</div>
       <div class="snav-tags"><span class="snav-pool">${escapeHtml(info.pool)}</span>${tagsHtml}</div>
     </div>
     <div class="snav-group snav-stats">
@@ -570,7 +571,7 @@ function renderSessions() {
 
     const info = document.createElement("div");
     info.className = "info";
-    info.innerHTML = `<div class="name">${harnessBadgeHTML(s)}${escapeHtml(name)}${errDotHtml}${hiddenNote}</div><div class="uuid">${shortId}${s.model ? " · " + s.model : ""}</div><div class="meta">${s.pool} · ${s.event_count} events · ${relTime}</div>${costStr ? `<div class="cost">${costStr}</div>` : ""}`;
+    info.innerHTML = `<div class="name">${harnessBadgeHTML(s)}${escapeHtml(name)}${errDotHtml}${hiddenNote}</div><div class="uuid">${shortId}${s.worktree ? " · ⎇ " + escapeHtml(s.worktree) : ""}${s.model ? " · " + escapeHtml(s.model) : ""}</div><div class="meta">${escapeHtml(s.pool)} · ${s.event_count} events · ${relTime}</div>${costStr ? `<div class="cost">${costStr}</div>` : ""}`;
 
     if (STATE.view === "single") {
       el.addEventListener("click", () => selectSession(s.session_id));
@@ -609,7 +610,7 @@ function buildMiniSessionItem(s) {
   const name = s.session_name ?? s.agent_name ?? s.cwd?.split("/").pop() ?? s.session_id;
   const stats = STATE.sessionStats[s.session_id];
   const costStr = stats ? ` · $${stats.total_cost.toFixed(4)}` : "";
-  el.title = `${name}\n${s.session_id.slice(0, 8)} · ${s.event_count} events · ${fmtRel(s.last_ts)}${costStr}`;
+  el.title = `${name}\n${s.session_id.slice(0, 8)}${s.worktree ? ` · ⎇ ${s.worktree}` : ""} · ${s.event_count} events · ${fmtRel(s.last_ts)}${costStr}`;
   el.textContent = agentLetter(s);
   const dot = document.createElement("span");
   dot.className = "mini-dot " + activityStatus(s);

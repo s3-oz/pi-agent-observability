@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { execFileSync } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -31,8 +32,29 @@ import {
 
 // ━━ Module-scope state ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let seqCounter = 0;
+const WORKTREE_CACHE_MS = 2500;
 
 // ━━ Helper functions ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function readGitWorktree(cwd: string): string | undefined {
+  try {
+    const branch = execFileSync("git", ["-C", cwd, "branch", "--show-current"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 200,
+    }).trim();
+    if (branch) return branch;
+
+    const shortHead = execFileSync("git", ["-C", cwd, "rev-parse", "--short", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 200,
+    }).trim();
+    return shortHead ? `detached:${shortHead}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function loadEnv(cwd: string) {
   const envPaths = [
@@ -221,6 +243,7 @@ function createEventEnvelope<T>(
     cwd: string;
     agentName?: string;
     sessionName?: string;
+    worktree?: string;
     pool: string;
     tags: string[];
     provider?: string;
@@ -237,6 +260,7 @@ function createEventEnvelope<T>(
     cwd: sessionInfo.cwd,
     agent_name: sessionInfo.agentName,
     session_name: sessionInfo.sessionName,
+    worktree: sessionInfo.worktree,
     pool: sessionInfo.pool,
     tags: sessionInfo.tags,
     provider: sessionInfo.provider,
@@ -413,6 +437,7 @@ export default function (pi: ExtensionAPI) {
     cwd: string;
     agentName?: string;
     sessionName?: string;
+    worktree?: string;
     pool: string;
     tags: string[];
     provider?: string;
@@ -428,6 +453,17 @@ export default function (pi: ExtensionAPI) {
   // turnIndex → ts of first text/thinking delta (per-turn TTFT marker).
   // Cleared alongside turnStartTimes at message_end.
   const firstTokenTimes = new Map<number, number>();
+  let worktreeCache: { cwd: string; value: string | undefined; checkedAt: number } | null = null;
+
+  function getCachedWorktree(cwd: string): string | undefined {
+    const now = Date.now();
+    if (worktreeCache && worktreeCache.cwd === cwd && now - worktreeCache.checkedAt < WORKTREE_CACHE_MS) {
+      return worktreeCache.value;
+    }
+    const value = readGitWorktree(cwd);
+    worktreeCache = { cwd, value, checkedAt: now };
+    return value;
+  }
 
   function logObs(message: string, extra?: any) {
     try {
@@ -440,6 +476,7 @@ export default function (pi: ExtensionAPI) {
   function enqueue<T>(type: string, payload: T) {
     if (!queue || !sessionInfo) return;
     sessionInfo.sessionName = pi.getSessionName();
+    sessionInfo.worktree = getCachedWorktree(sessionInfo.cwd);
     queue.push(createEventEnvelope(type, payload, sessionInfo));
   }
 
@@ -517,6 +554,7 @@ export default function (pi: ExtensionAPI) {
       cwd: ctx.cwd,
       agentName: name,
       sessionName: ctx.sessionManager.getSessionName(),
+      worktree: getCachedWorktree(ctx.cwd),
       pool,
       tags,
       provider: ctx.model?.provider,

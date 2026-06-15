@@ -41,6 +41,8 @@ export interface ObsEventEnvelope<P = unknown> {
   session_file?: string;
   /** Pi session display name from --name or /name, if set */
   session_name?: string;
+  /** Current worktree/branch label, if available */
+  worktree?: string;
   /** the agent's working directory at session_start */
   cwd: string;
   /** human-friendly name from --o-name (optional) */
@@ -289,6 +291,7 @@ export interface SessionSummary {
   pool: string;
   agent_name?: string;
   session_name?: string;
+  worktree?: string;
   cwd?: string;
   session_file?: string;
   provider?: string;

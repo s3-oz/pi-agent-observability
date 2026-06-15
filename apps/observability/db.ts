@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   pool         TEXT NOT NULL DEFAULT 'default',
   agent_name   TEXT,
   session_name TEXT,
+  worktree     TEXT,
   cwd          TEXT,
   session_file TEXT,
   provider     TEXT,
@@ -70,6 +71,7 @@ export function createDb(path: string): Database {
   // Additive migrations for DBs created before these columns existed.
   try { db.run("ALTER TABLE sessions ADD COLUMN harness TEXT"); } catch { /* already present */ }
   try { db.run("ALTER TABLE sessions ADD COLUMN session_name TEXT"); } catch { /* already present */ }
+  try { db.run("ALTER TABLE sessions ADD COLUMN worktree TEXT"); } catch { /* already present */ }
   return db;
 }
 
@@ -88,13 +90,14 @@ export function prepare(db: Database): PreparedQueries {
   // incoming values. Tags are merged via UNION to accumulate unique tags.
   const upsertSession = db.query(`
     INSERT INTO sessions
-      (session_id, pool, agent_name, session_name, cwd, session_file, provider, model, harness, first_ts, last_ts, event_count, tags_json)
+      (session_id, pool, agent_name, session_name, worktree, cwd, session_file, provider, model, harness, first_ts, last_ts, event_count, tags_json)
     VALUES
-      ($session_id, $pool, $agent_name, $session_name, $cwd, $session_file, $provider, $model, $harness, $ts, $ts, 1, $tags_json)
+      ($session_id, $pool, $agent_name, $session_name, $worktree, $cwd, $session_file, $provider, $model, $harness, $ts, $ts, 1, $tags_json)
     ON CONFLICT(session_id) DO UPDATE SET
       pool         = COALESCE(excluded.pool,         sessions.pool),
       agent_name   = COALESCE(excluded.agent_name,   sessions.agent_name),
       session_name = COALESCE(excluded.session_name, sessions.session_name),
+      worktree     = COALESCE(excluded.worktree,     sessions.worktree),
       cwd          = COALESCE(excluded.cwd,          sessions.cwd),
       session_file = COALESCE(excluded.session_file, sessions.session_file),
       provider     = COALESCE(excluded.provider,     sessions.provider),
@@ -116,13 +119,14 @@ export function prepare(db: Database): PreparedQueries {
   // ── Upsert session without bumping event_count (duplicate events) ──────
   const upsertSessionNoBump = db.query(`
     INSERT INTO sessions
-      (session_id, pool, agent_name, session_name, cwd, session_file, provider, model, harness, first_ts, last_ts, event_count, tags_json)
+      (session_id, pool, agent_name, session_name, worktree, cwd, session_file, provider, model, harness, first_ts, last_ts, event_count, tags_json)
     VALUES
-      ($session_id, $pool, $agent_name, $session_name, $cwd, $session_file, $provider, $model, $harness, $ts, $ts, 1, $tags_json)
+      ($session_id, $pool, $agent_name, $session_name, $worktree, $cwd, $session_file, $provider, $model, $harness, $ts, $ts, 1, $tags_json)
     ON CONFLICT(session_id) DO UPDATE SET
       pool         = COALESCE(excluded.pool,         sessions.pool),
       agent_name   = COALESCE(excluded.agent_name,   sessions.agent_name),
       session_name = COALESCE(excluded.session_name, sessions.session_name),
+      worktree     = COALESCE(excluded.worktree,     sessions.worktree),
       cwd          = COALESCE(excluded.cwd,          sessions.cwd),
       session_file = COALESCE(excluded.session_file, sessions.session_file),
       provider     = COALESCE(excluded.provider,     sessions.provider),
@@ -146,6 +150,7 @@ export function prepare(db: Database): PreparedQueries {
       session_id, pool,
       COALESCE(agent_name, '') AS agent_name,
       COALESCE(session_name, '') AS session_name,
+      COALESCE(worktree, '') AS worktree,
       COALESCE(cwd, '') AS cwd,
       COALESCE(session_file, '') AS session_file,
       COALESCE(provider, '') AS provider,
@@ -278,6 +283,7 @@ export function toSessionRow(e: ObsEvent): Record<string, unknown> {
     $pool: e.pool ?? "default",
     $agent_name: e.agent_name ?? null,
     $session_name: e.session_name ?? null,
+    $worktree: e.worktree ?? null,
     $cwd: e.cwd ?? null,
     $session_file: e.session_file ?? null,
     $provider: e.provider ?? null,
@@ -312,6 +318,7 @@ export function rowToSession(row: any): SessionSummary {
     pool: row.pool,
     agent_name: row.agent_name || undefined,
     session_name: row.session_name || undefined,
+    worktree: row.worktree || undefined,
     cwd: row.cwd || undefined,
     session_file: row.session_file || undefined,
     provider: row.provider || undefined,

@@ -68,6 +68,7 @@ interface ObsEvent {
   session_id:  string;        // pi session uuid
   session_file?: string;      // absolute path to session.jsonl (if any)
   session_name?: string;      // Pi session display name (from --name or /name)
+  worktree?:   string;        // current git worktree/branch label, if available
   cwd:         string;
   agent_name?: string;        // optional human name (from --o-name)
   pool?:       string;        // --o-pool, defaults to "default"
@@ -144,6 +145,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   pool         TEXT NOT NULL DEFAULT 'default',
   agent_name   TEXT,
   session_name TEXT,
+  worktree     TEXT,
   cwd          TEXT,
   session_file TEXT,
   provider     TEXT,

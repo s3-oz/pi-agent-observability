@@ -26,6 +26,16 @@ export type ObsEventType =
   | "compaction"
   | "branch_nav";
 
+export interface SessionHost {
+  type: string;
+  session?: string;
+  window?: string;
+  pane?: string;
+  attachCommand?: string;
+  readonlyAttachCommand?: string;
+  [key: string]: unknown;
+}
+
 export interface ObsEventEnvelope<P = unknown> {
   /** uuid v4, client-generated, primary key on the server */
   event_id: string;
@@ -57,6 +67,8 @@ export interface ObsEventEnvelope<P = unknown> {
   model?: string;
   /** explicit harness tag (e.g. "CC" | "CODEX" | "PI"); when absent the server derives it from `pool` */
   harness?: string;
+  /** explicit terminal/host metadata. Consumers must not infer this from names/paths. */
+  host?: SessionHost;
 
   // ── payload + ordering ──
   payload: P;

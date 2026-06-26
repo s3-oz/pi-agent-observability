@@ -28,6 +28,7 @@ import {
   type PromptText,
   type ContextFileDigest,
   type SkillDigest,
+  type SessionHost,
 } from "../shared/types.ts";
 
 // ━━ Module-scope state ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -150,6 +151,39 @@ function sha256hex(s: string): string {
   return crypto.createHash("sha256").update(s, "utf8").digest("hex");
 }
 
+function shellQuote(value: string): string {
+  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
+}
+
+function detectTmuxHost(env: NodeJS.ProcessEnv = process.env): SessionHost | undefined {
+  const paneTarget = env.TMUX_PANE;
+  if (!env.TMUX || !paneTarget) return undefined;
+
+  try {
+    const out = execFileSync(
+      "tmux",
+      ["display-message", "-p", "-t", paneTarget, "#{session_name}\t#{window_index}\t#{pane_index}"],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 250,
+      },
+    ).trim();
+    const [session, window, pane] = out.split("\t");
+    if (!session) return undefined;
+    return {
+      type: "tmux",
+      session,
+      window: window || undefined,
+      pane: pane || undefined,
+      attachCommand: `tmux attach -t ${shellQuote(session)}`,
+      readonlyAttachCommand: `tmux attach -r -t ${shellQuote(session)}`,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 // Boot-snapshot fields (system prompt, skills, context files, custom/append
 // prompts) are captured verbatim with no truncation — this event fires once
 // per session and the user explicitly wants full fidelity for audit. Bytes
@@ -248,6 +282,7 @@ function createEventEnvelope<T>(
     tags: string[];
     provider?: string;
     model?: string;
+    host?: SessionHost;
   }
 ): ObsEventEnvelope<T> {
   const seq = seqCounter++;
@@ -265,6 +300,7 @@ function createEventEnvelope<T>(
     tags: sessionInfo.tags,
     provider: sessionInfo.provider,
     model: sessionInfo.model,
+    host: sessionInfo.host,
     payload,
     seq,
   };
@@ -442,6 +478,7 @@ export default function (pi: ExtensionAPI) {
     tags: string[];
     provider?: string;
     model?: string;
+    host?: SessionHost;
   } | null = null;
 
   let activeTurnIndex = 0;
@@ -559,6 +596,7 @@ export default function (pi: ExtensionAPI) {
       tags,
       provider: ctx.model?.provider,
       model: ctx.model?.id,
+      host: detectTmuxHost(),
     };
 
     // 6. Log boot

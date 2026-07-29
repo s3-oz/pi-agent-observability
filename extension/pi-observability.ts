@@ -32,8 +32,26 @@ import {
 } from "../shared/types.ts";
 
 // ━━ Module-scope state ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-let seqCounter = 0;
+// Pi `/reload` retains the logical session id but reloads extension handlers.
+// Keep sequence state on globalThis so a new extension generation in the same
+// process cannot restart at zero. The wall-clock floor also prevents reuse when
+// a session is resumed in a fresh process. Date.now() * 1000 remains below
+// Number.MAX_SAFE_INTEGER and leaves room for multiple events in one millisecond.
+const SEQUENCE_STATE_KEY = Symbol.for("pi-agent-observability.sequence-state.v1");
+type SequenceState = Map<string, number>;
+const sequenceState = (() => {
+  const root = globalThis as any;
+  return (root[SEQUENCE_STATE_KEY] as SequenceState | undefined)
+    ?? (root[SEQUENCE_STATE_KEY] = new Map<string, number>());
+})();
 const WORKTREE_CACHE_MS = 2500;
+
+function nextSequence(sessionId: string): number {
+  const previous = sequenceState.get(sessionId) ?? -1;
+  const next = Math.max(previous + 1, Date.now() * 1000);
+  sequenceState.set(sessionId, next);
+  return next;
+}
 
 // ━━ Helper functions ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -285,7 +303,7 @@ function createEventEnvelope<T>(
     host?: SessionHost;
   }
 ): ObsEventEnvelope<T> {
-  const seq = seqCounter++;
+  const seq = nextSequence(sessionInfo.sessionId);
   return {
     event_id: crypto.randomUUID(),
     ts: new Date().toISOString(),
@@ -317,14 +335,14 @@ class EventQueue {
   private isFlushing = false;
   private consecutiveFailures = 0;
   private droppedEventsCount = 0;
-  private getNextSeq: () => number;
+  private getNextSeq: (sessionId: string) => number;
 
   constructor(
     private serverUrl: string,
     private token: string,
     private pi: ExtensionAPI,
     private onPostFailed: (err: any) => void,
-    getNextSeq: () => number
+    getNextSeq: (sessionId: string) => number
   ) {
     this.getNextSeq = getNextSeq;
   }
@@ -362,7 +380,7 @@ class EventQueue {
       },
       // Allocate a real monotonic seq instead of -1 (which would collide on the
       // server's (session_id, seq) UNIQUE index if overflow recurs).
-      seq: this.getNextSeq(),
+      seq: this.getNextSeq(sessionId),
     };
   }
 
@@ -396,6 +414,22 @@ class EventQueue {
 
       if (!response.ok) {
         throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+      }
+
+      // A receiver can accept the HTTP request while rejecting distinct events
+      // that reused a stored (session_id, seq). Surface that integrity failure
+      // in the native transcript; retrying the same collided batch cannot heal it.
+      let receipt: any;
+      try {
+        receipt = await response.json();
+      } catch {
+        receipt = undefined;
+      }
+      const collisions = Array.isArray(receipt?.collisions) ? receipt.collisions : [];
+      if (collisions.length > 0) {
+        this.onPostFailed(new Error(
+          `OBS sequence collision: receiver rejected ${collisions.length} distinct event(s) (${collisions.slice(0, 3).join(", ")})`,
+        ));
       }
 
       // Success! Remove sent items from the queue
@@ -541,8 +575,8 @@ export default function (pi: ExtensionAPI) {
       tags = process.env.OBS_TAG.split(",").map(t => t.trim()).filter(Boolean);
     }
 
-    // 3. Reset seq counter + boot-snapshot gate
-    seqCounter = 0;
+    // 3. Reset only the per-generation boot-snapshot gate. Event sequences
+    // remain monotonic across reload generations of the same logical session.
     bootSnapshotEmitted = false;
 
     // 4. Initialize Queue Manager
@@ -553,7 +587,7 @@ export default function (pi: ExtensionAPI) {
       (err) => {
         logObs("post_failed", { error: err?.message || String(err) });
       },
-      () => seqCounter++
+      (sessionId) => nextSequence(sessionId)
     );
 
     if (!token) {

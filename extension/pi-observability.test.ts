@@ -102,8 +102,42 @@ describe("OBS sequence continuity", () => {
     await second.emit("session_shutdown", { reason: "exit" }, ctx);
 
     expect(posted).toHaveLength(2);
+    // A reload is not an end (obs-console#99): the first generation flushes
+    // its pending events but emits no session_shutdown closure.
+    expect(posted[0].map((event) => event.type)).toEqual(["session_start", "agent_start"]);
     const firstSeq = posted[0].map((event) => event.seq);
     const secondSeq = posted[1].map((event) => event.seq);
     expect(Math.min(...secondSeq)).toBeGreaterThan(Math.max(...firstSeq));
+  });
+
+  test("a reload emits no session_shutdown while a real exit still does", async () => {
+    const posted: any[][] = [];
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/health")) return new Response("ok", { status: 200 });
+      if (url.endsWith("/events")) {
+        posted.push(JSON.parse(String(init?.body ?? "[]")));
+        return Response.json({ ingested: 1, rejected: [] });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    }) as typeof fetch;
+
+    const sessionId = "reload-no-closure";
+    const ctx = context(sessionId);
+
+    const generation = mockPi();
+    observability(generation.pi as any);
+    await generation.emit("session_start", { reason: "startup" }, ctx);
+    await generation.emit("before_agent_start", { prompt: "work" }, ctx);
+    await generation.emit("session_shutdown", { reason: "reload" }, ctx);
+    const afterReload = posted.flat().filter((event) => event.type === "session_shutdown");
+    expect(afterReload).toEqual([]);
+
+    // The same generation keeps serving; a later real exit still closes.
+    await generation.emit("before_agent_start", { prompt: "more work" }, ctx);
+    await generation.emit("session_shutdown", { reason: "quit" }, ctx);
+    const exits = posted.flat().filter((event) => event.type === "session_shutdown");
+    expect(exits).toHaveLength(1);
+    expect(exits[0].payload.reason).toBe("quit");
   });
 });

@@ -927,6 +927,16 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", async (event, _ctx) => {
     if (!queue || !sessionInfo) return;
 
+    // A pi /reload continues the same logical session — it is not an end.
+    // Flush this generation's pending events (the next handler generation
+    // re-asserts the session with its own session_start) but write no closure:
+    // a fabricated session_shutdown here used to pin live sessions closed in
+    // OBS (obs-console#99).
+    if (event.reason === "reload") {
+      await queue.stop();
+      return;
+    }
+
     const shutdownPayload: SessionShutdownPayload = {
       reason: event.reason,
     };

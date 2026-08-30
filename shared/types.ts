@@ -33,6 +33,8 @@ export interface SessionHost {
   pane?: string;
   attachCommand?: string;
   readonlyAttachCommand?: string;
+  /** Orca-hosted sessions: opaque runtime-issued terminal handle (env ORCA_TERMINAL_HANDLE). */
+  terminalHandle?: string;
   [key: string]: unknown;
 }
 

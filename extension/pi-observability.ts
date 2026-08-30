@@ -173,6 +173,30 @@ function shellQuote(value: string): string {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
+const ORCA_TERMINAL_HANDLE_PATTERN = /^term_[0-9a-f-]{32,36}$/;
+
+/**
+ * Orca-hosted session detection (obs-console #119 registry contract): Orca
+ * injects ORCA_TERMINAL_HANDLE into every PTY it spawns, harness-agnostic.
+ * Env-only (no subprocess); the opaque handle is the only identity retained —
+ * no pane/tab/layout snapshots, no runtimeId (handles survive runtime
+ * restarts). Absent/malformed env -> undefined, never a guess.
+ */
+function detectOrcaHost(env: NodeJS.ProcessEnv = process.env): SessionHost | undefined {
+  const handle = env.ORCA_TERMINAL_HANDLE;
+  if (!handle || !ORCA_TERMINAL_HANDLE_PATTERN.test(handle)) return undefined;
+  return { type: "orca", terminalHandle: handle };
+}
+
+/**
+ * Session-host detector chain: first match wins. Order matters — an Orca pane
+ * is the outer addressable surface (focusing it reveals anything inside, e.g.
+ * a tmux session), so orca precedes tmux.
+ */
+export function detectSessionHost(env: NodeJS.ProcessEnv = process.env): SessionHost | undefined {
+  return detectOrcaHost(env) ?? detectTmuxHost(env);
+}
+
 function detectTmuxHost(env: NodeJS.ProcessEnv = process.env): SessionHost | undefined {
   const paneTarget = env.TMUX_PANE;
   if (!env.TMUX || !paneTarget) return undefined;
@@ -630,7 +654,7 @@ export default function (pi: ExtensionAPI) {
       tags,
       provider: ctx.model?.provider,
       model: ctx.model?.id,
-      host: detectTmuxHost(),
+      host: detectSessionHost(),
     };
 
     // 6. Log boot

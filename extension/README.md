@@ -68,3 +68,11 @@ The extension maps agent events directly into the canonical `ObsEvent` envelopes
 - **`model_change`**: Captured on manual switches or model cycling.
 - **`compaction`**: Emitted when session history is compacted (manual or auto).
 - **`branch_nav`**: Emitted on session-tree branch navigation (with optional summary preview).
+
+## OBS Console durable delivery (Oz fork)
+
+The extension writes producer-spool v1 records before posting to OBS Console. Install an OBS Console receiver with issue #144 support first. Pending files live under `$XDG_STATE_HOME/nexus/obs-pending/v1` (default `~/.local/state/nexus/obs-pending/v1`), or `OBS_PRODUCER_SPOOL_DIR`; configure the same path for the producer and receiver. The records contain event payloads, never auth tokens, and retain their original IDs/sequences across retries. Keep pending and quarantined files during upgrades.
+
+The receiver independently recovers loopback-3460 pending files, including after Pi exits. The extension's memory queue is bounded without dropping successfully journaled events. POSTs have a 2.5-second deadline, use byte-bounded batches, and request `?receipt=v1`; only explicit durable acknowledgements remove records. Old receivers without those acknowledgements leave data pending, so upgrade receivers before loading this extension. Shutdown makes a bounded attempt and leaves the remaining backlog durable. Disk failures are logged and retained in memory when possible; disk exhaustion still requires operator attention.
+
+Events now carry `harness: OBS_HARNESS || "PI"`. Existing processes need an explicit reload or a new Pi session to load the changed extension. These changes do not alter native token normalization or count `turn_end.usage` a second time.

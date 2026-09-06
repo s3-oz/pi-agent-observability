@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { acknowledgeFile, spoolEvent } from "./durable-spool.ts";
 import {
   truncateToBytes,
   MAX_TEXT_FIELD,
@@ -342,6 +343,7 @@ function createEventEnvelope<T>(
     tags: sessionInfo.tags,
     provider: sessionInfo.provider,
     model: sessionInfo.model,
+    harness: process.env.OBS_HARNESS || "PI",
     host: sessionInfo.host,
     payload,
     seq,
@@ -351,136 +353,99 @@ function createEventEnvelope<T>(
 // ━━ Event Queue Manager ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class EventQueue {
-  private queue: any[] = [];
-  private maxQueueSize = 10000;
+  private queue: Array<{ event: any; file?: string }> = [];
   private flushTimer: NodeJS.Timeout | null = null;
   private backoffMs = 250;
-  private maxBackoffMs = 5000;
-  private isFlushing = false;
-  private consecutiveFailures = 0;
-  private droppedEventsCount = 0;
-  private getNextSeq: (sessionId: string) => number;
+  private flushing: Promise<void> | null = null;
+  private stopped = false;
 
   constructor(
     private serverUrl: string,
     private token: string,
     private pi: ExtensionAPI,
     private onPostFailed: (err: any) => void,
-    getNextSeq: (sessionId: string) => number
-  ) {
-    this.getNextSeq = getNextSeq;
-  }
+    _getNextSeq: (sessionId: string) => number
+  ) {}
 
   public push(event: any) {
-    if (this.queue.length >= this.maxQueueSize) {
-      this.queue.shift(); // Drop oldest
-      this.droppedEventsCount++;
-      if (this.droppedEventsCount === 1) {
-        const overflowError = this.createOverflowErrorEvent(event.session_id, event.cwd, event.pool, event.tags);
-        this.queue.push(overflowError);
-      }
-    }
-    this.queue.push(event);
-
-    if (this.queue.length >= 50) {
-      void this.flush();
-    } else {
-      this.scheduleFlush();
-    }
-  }
-
-  private createOverflowErrorEvent(sessionId: string, cwd: string, pool: string, tags: string[]): any {
-    return {
-      event_id: crypto.randomUUID(),
-      ts: new Date().toISOString(),
-      type: "error",
-      session_id: sessionId,
-      cwd: cwd,
-      pool: pool,
-      tags: tags,
-      payload: {
-        message: "Extension event queue overflowed. Oldest events dropped.",
-        where: "extension-queue",
-      },
-      // Allocate a real monotonic seq instead of -1 (which would collide on the
-      // server's (session_id, seq) UNIQUE index if overflow recurs).
-      seq: this.getNextSeq(sessionId),
-    };
+    let file: string | undefined;
+    try { file = spoolEvent(event, this.serverUrl); }
+    catch (error) { this.onPostFailed(error); }
+    // The disk journal owns the backlog. Bound memory without deleting events.
+    // If disk capture fails, retain that event in memory and report the failure.
+    if (this.queue.length < 500 || !file) this.queue.push({ event, file });
+    if (this.queue.length >= 50) void this.flush();
+    else this.scheduleFlush();
   }
 
   private scheduleFlush() {
-    if (this.flushTimer) return;
+    if (this.stopped || this.flushTimer) return;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
       void this.flush();
     }, this.backoffMs);
+    this.flushTimer.unref?.();
   }
 
-  public async flush() {
-    if (this.isFlushing || this.queue.length === 0) return;
-    this.isFlushing = true;
+  public flush(): Promise<void> {
+    if (this.flushing) return this.flushing;
+    if (!this.queue.length) return Promise.resolve();
+    this.flushing = this.sendBatch().finally(() => {
+      this.flushing = null;
+      if (this.queue.length) this.scheduleFlush();
+    });
+    return this.flushing;
+  }
 
-    const batch = this.queue.slice(0, 50);
-
-    try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (this.token) {
-        headers["Authorization"] = `Bearer ${this.token}`;
+  private async sendBatch() {
+    const batch: Array<{ event: any; file?: string }> = [];
+    let bytes = 2;
+    for (const item of this.queue) {
+      const size = Buffer.byteLength(JSON.stringify(item.event)) + 1;
+      if (size > 3 * 1024 * 1024) {
+        if (item.file) this.queue = this.queue.filter((queued) => queued !== item);
+        this.onPostFailed(new Error("OBS oversized event retained for spool recovery"));
+        continue;
       }
-
-      const response = await fetch(`${this.serverUrl}/events`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(batch),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
-      }
-
-      // A receiver can accept the HTTP request while rejecting distinct events
-      // that reused a stored (session_id, seq). Surface that integrity failure
-      // in the native transcript; retrying the same collided batch cannot heal it.
-      let receipt: any;
-      try {
-        receipt = await response.json();
-      } catch {
-        receipt = undefined;
-      }
-      const collisions = Array.isArray(receipt?.collisions) ? receipt.collisions : [];
-      if (collisions.length > 0) {
-        this.onPostFailed(new Error(
-          `OBS sequence collision: receiver rejected ${collisions.length} distinct event(s) (${collisions.slice(0, 3).join(", ")})`,
-        ));
-      }
-
-      // Success! Remove sent items from the queue
-      this.queue.splice(0, batch.length);
-      this.consecutiveFailures = 0;
-      this.backoffMs = 250;
-      this.droppedEventsCount = 0;
-    } catch (err) {
-      this.consecutiveFailures++;
-      this.onPostFailed(err);
-      this.backoffMs = Math.min(this.backoffMs * 2, this.maxBackoffMs);
-    } finally {
-      this.isFlushing = false;
-      if (this.queue.length > 0) {
-        this.scheduleFlush();
-      }
+      if (batch.length >= 50 || bytes + size > 3 * 1024 * 1024) break;
+      batch.push(item);
+      bytes += size;
     }
+    if (!batch.length) return;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    timeout.unref?.();
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (this.token) headers.Authorization = `Bearer ${this.token}`;
+      const response = await fetch(`${this.serverUrl.replace(/\/+$/, "")}/events?receipt=v1`, {
+        method: "POST", headers, body: JSON.stringify(batch.map((item) => item.event)), signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+      const receipt = await response.json() as any;
+      const collisions = Array.isArray(receipt.collisions) ? receipt.collisions : [];
+      if (collisions.length) this.onPostFailed(new Error(`OBS sequence collision: ${collisions.length} event(s) retained for diagnosis`));
+      const expected = new Set(batch.map((item) => item.event.event_id));
+      if (!Array.isArray(receipt.acknowledged)
+        || receipt.acknowledged.some((id: unknown) => typeof id !== "string" || !expected.has(id) || collisions.includes(id))) {
+        throw new Error("OBS acknowledgement unavailable; pending events remain durable");
+      }
+      const acknowledged = new Set(receipt.acknowledged);
+      for (const item of batch) if (acknowledged.has(item.event.event_id)) acknowledgeFile(item.file);
+      this.queue = this.queue.filter((item) => !acknowledged.has(item.event.event_id));
+      this.backoffMs = acknowledged.size ? 250 : Math.min(this.backoffMs * 2, 5000);
+    } catch (error) {
+      this.onPostFailed(error);
+      this.backoffMs = Math.min(this.backoffMs * 2, 5000);
+    } finally { clearTimeout(timeout); }
   }
 
   public async stop() {
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
-    if (this.queue.length > 0) {
-      await this.flush();
-    }
+    this.stopped = true;
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
+    // At most one bounded network attempt. Remaining records survive this
+    // generation and are recovered by OBS without another Pi session.
+    await this.flush();
   }
 }
 

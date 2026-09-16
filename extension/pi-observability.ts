@@ -166,6 +166,18 @@ function extractUserMessage(content: any): { text: string; images_count: number 
   return { text: text.trim(), images_count };
 }
 
+/**
+ * Harness-shape normaliser for the boot-snapshot system prompt. Upstream Pi
+ * delivers `BeforeAgentStartEvent.systemPrompt` as a string; OMP delivers a
+ * `string[]` of prompt chunks (obs-console#159). Chunks are joined in order —
+ * that is how the harness concatenates them when assembling the prompt.
+ */
+function normaliseSystemPrompt(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) return raw.filter((chunk): chunk is string => typeof chunk === "string").join("\n\n");
+  return "";
+}
+
 function sha256hex(s: string): string {
   return crypto.createHash("sha256").update(s, "utf8").digest("hex");
 }
@@ -649,7 +661,7 @@ export default function (pi: ExtensionAPI) {
       session_file: sessionInfo.sessionFile,
     };
     if (!bootSnapshotEmitted) {
-      const sys = event.systemPrompt ?? "";
+      const sys = normaliseSystemPrompt(event.systemPrompt);
       if (sys) {
         payload.system_prompt = sys;
         payload.system_prompt_bytes = Buffer.byteLength(sys, "utf8");

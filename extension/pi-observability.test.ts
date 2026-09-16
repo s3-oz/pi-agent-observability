@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -204,4 +206,77 @@ test("memory queue saturation leaves all events in the durable backlog", async (
   for (let turnIndex = 0; turnIndex < 510; turnIndex++) await generation.emit("turn_start", { turnIndex }, ctx);
   await generation.emit("session_shutdown", { reason: "quit" }, ctx);
   expect(readdirSync(spoolRoot).filter(name => name.endsWith(".json"))).toHaveLength(512);
+});
+
+describe("OMP systemPrompt shape (obs-console#159)", () => {
+  // Envelope bodies are our own producer's JSON; the batch shape is asserted
+  // through typed reads instead of `any` so a schema drift fails loudly here.
+  type ObsEvent = { type: string; payload: Record<string, unknown> };
+  const parseBatch = (body: unknown): ObsEvent[] => JSON.parse(String(body ?? "[]"));
+  // mockPi's handler registry covers the ExtensionAPI surface observability
+  // uses; the structural gap is the point of the mock, hence the single cast.
+  const install = (generation: { pi: object }) => observability(generation.pi as ExtensionAPI);
+  const agentStarts = (posted: ObsEvent[][]) => posted.flat().filter((event) => event.type === "agent_start");
+
+  function capturePosts() {
+    const posted: ObsEvent[][] = [];
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/health")) return new Response("ok", { status: 200 });
+      if (url.includes("/events")) {
+        posted.push(parseBatch(init?.body));
+        return successReceipt(init);
+      }
+      throw new Error(`unexpected URL ${url}`);
+    }) as typeof fetch;
+    return posted;
+  }
+
+  test("a string[] system prompt yields one boot snapshot instead of crashing every turn", async () => {
+    const posted = capturePosts();
+    const generation = mockPi();
+    const ctx = context("omp-array-prompt");
+    install(generation);
+    await generation.emit("session_start", { reason: "startup" }, ctx);
+    // OMP shape: chunks joined in assembly order.
+    await generation.emit("before_agent_start", { prompt: "turn one", systemPrompt: ["You are Pi.", "Be helpful."] }, ctx);
+    await generation.emit("before_agent_start", { prompt: "turn two", systemPrompt: ["You are Pi.", "Be helpful."] }, ctx);
+    await generation.emit("session_shutdown", { reason: "quit" }, ctx);
+
+    const starts = agentStarts(posted);
+    expect(starts).toHaveLength(2);
+    const joined = "You are Pi.\n\nBe helpful.";
+    expect(starts[0].payload.system_prompt).toBe(joined);
+    expect(starts[0].payload.system_prompt_bytes).toBe(Buffer.byteLength(joined, "utf8"));
+    expect(starts[0].payload.system_prompt_sha256).toBe(
+      createHash("sha256").update(joined, "utf8").digest("hex"),
+    );
+    // The snapshot is once-per-process, not once-per-attempt: the second
+    // turn still emits agent_start but without a duplicate snapshot.
+    expect(starts[1].payload.system_prompt).toBeUndefined();
+  });
+
+  test("upstream string shape and junk entries stay well-formed", async () => {
+    const posted = capturePosts();
+    const generation = mockPi();
+    const ctx = context("upstream-string-prompt");
+    install(generation);
+    await generation.emit("session_start", { reason: "startup" }, ctx);
+    await generation.emit("before_agent_start", { prompt: "work", systemPrompt: "Plain upstream prompt." }, ctx);
+    await generation.emit("session_shutdown", { reason: "quit" }, ctx);
+
+    const starts = agentStarts(posted);
+    expect(starts).toHaveLength(1);
+    expect(starts[0].payload.system_prompt).toBe("Plain upstream prompt.");
+    expect(starts[0].payload.system_prompt_truncated).toBe(false);
+
+    const junk = mockPi();
+    install(junk);
+    await junk.emit("session_start", { reason: "startup" }, ctx);
+    await junk.emit("before_agent_start", { prompt: "junk", systemPrompt: [42, null, "real chunk"] }, ctx);
+    await junk.emit("session_shutdown", { reason: "quit" }, ctx);
+    const junkStarts = agentStarts(posted).slice(1);
+    expect(junkStarts).toHaveLength(1);
+    expect(junkStarts[0].payload.system_prompt).toBe("real chunk");
+  });
 });
